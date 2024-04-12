@@ -1,0 +1,52 @@
+parameters:
+  azureConnection: ''
+  env: ''
+
+steps:
+  - pwsh: |
+       echo "Parameters for Creating Resource Group:"
+       echo "${{ convertToJson(parameters) }}"    
+    condition: succeeded()
+
+  - task: AzureCLI@2
+    displayName: 'Check if Resource Group exists'
+    condition: succeeded()
+    inputs:
+      azureSubscription: "${{ parameters.azureConnection }}"
+      failOnStandardError: false
+      powerShellIgnoreLASTEXITCODE: true
+      scriptType: pscore
+      scriptLocation: inlineScript
+      inlineScript: |
+        $resource = az group show --name $(resourceGroupName) | ConvertFrom-Json
+        $resourceExists = $resource.Length -gt 0
+        echo "##vso[task.setvariable variable=resourceExists]$resourceExists"
+
+  - task: qetza.replacetokens.replacetokens-task.replacetokens@3
+    displayName: 'Replace tokens in Resource Group Bicep file.'
+    condition: and(succeeded(),eq(variables['resourceExists'], 'false'))
+    inputs:
+      rootDirectory: '$(Build.SourcesDirectory)/Infrastructure/Azure/Resources/Flask/ResourceGroup'
+      targetFiles: 'main.bicepparam'
+      tokenPrefix: '$('
+      tokenSuffix: ')'
+
+  - pwsh: |
+      write-output "Resource Group Bicep Parameters File content"
+      gc $(Build.SourcesDirectory)/Infrastructure/Azure/Resources/Flask/ResourceGroup/main.bicepparam
+    displayName: "Print Resource Group Bicep Parameters File"
+    condition: and(succeeded(),eq(variables['resourceExists'], 'false'))
+
+  - task: AzureResourceManagerTemplateDeployment@3
+    displayName: 'Deploy Resource Group'
+    condition: and(succeeded(),eq(variables['resourceExists'], 'false'))
+    inputs:
+      deploymentScope: Subscription
+      azureResourceManagerConnection: "${{ parameters.azureConnection }}"
+      action: 'Create or Update Resource Group'
+      location: $(location)
+      subscriptionId: ${{ variables.subscriptionId }}
+      csmFile: '$(Build.SourcesDirectory)/Infrastructure/Azure/Resources/Flask/ResourceGroup/main.bicep'
+      csmParametersFile: '$(Build.SourcesDirectory)/Infrastructure/Azure/Resources/Flask/ResourceGroup/main.bicepparam'
+      deploymentMode: 'Incremental'
+      deploymentName: 'ResourceGroupBicep-${{ parameters.env }}-$(Build.BuildId)'

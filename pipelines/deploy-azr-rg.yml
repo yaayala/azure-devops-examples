@@ -1,0 +1,45 @@
+trigger:
+- none
+
+parameters:
+  - name: environments
+    type: object
+    default: 
+      - iteration: "1" 
+        env:  
+          - 'DEV'
+          - 'QA'
+          - 'UAT'
+          - 'STG'
+          - 'TST'
+          - 'PRD'
+stages:
+  - ${{ each e in parameters.environments }}:
+    - ${{ each env in e.env }}:
+      - stage: "${{ env }}"
+        displayName: "Deploy IaC on ${{ env }} Environment"
+        variables:
+          - template: "${{variables.System.ArtifactsDirectory}}/Infrastructure/Variables/manifest-flask-${{ env }}.yml"
+        pool: "Self-Hosted-Agent"
+        dependsOn: []
+        jobs:
+          - deployment: DeploymentJob
+            environment: "${{ env }}"
+            strategy:
+              runOnce:
+                deploy:
+                  steps:
+                  - checkout: self
+                  - pwsh: |
+                       echo "Environment Variables: manifest-flask-${{ env }}.yml"
+                       ls ${{variables.system.ArtifactsDirectory}}
+
+                  - template: "${{variables.system.ArtifactsDirectory}}/Infrastructure/Azure/Resources/Templates/ResourceGroup/Create.yml"
+                    parameters: 
+                      azureConnection: ${{variables.azureConnection}}
+                      env: ${{ env }}
+
+                  - template: "${{variables.system.ArtifactsDirectory}}/Infrastructure/Azure/Resources/Templates/WebApp/Create.yml"
+                    parameters: 
+                      azureConnection: ${{variables.azureConnection}}
+                      env: ${{ env }}
